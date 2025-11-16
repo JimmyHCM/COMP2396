@@ -1,0 +1,27 @@
+ALGORITHM CalculateMinimumTime
+    INPUT: n, switchCost, tunMunRoad[0..n], castlePeakRoad[0..n]
+    OUTPUT: Minimum time needed
+
+    // Initialize DP arrays
+    DECLARE dp1[0..n], dp2[0..n]
+
+    // Base cases
+    dp1[0] ← tunMunRoad[0]
+    dp2[0] ← castlePeakRoad[0]
+
+    // Fill DP tables
+    FOR i ← 1 TO n DO
+        // For Tuen Mun Road
+        stayOnTuenMun ← dp1[i-1] + tunMunRoad[i]
+        switchToTuenMun ← dp2[i-1] + switchCost + tunMunRoad[i]
+        dp1[i] ← MIN(stayOnTuenMun, switchToTuenMun)
+
+        // For Castle Peak Road
+        stayOnCastlePeak ← dp2[i-1] + castlePeakRoad[i]
+        switchToCastlePeak ← dp1[i-1] + switchCost + castlePeakRoad[i]
+        dp2[i] ← MIN(stayOnCastlePeak, switchToCastlePeak)
+    END FOR
+
+    // Return minimum of both final positions
+    RETURN MIN(dp1[n], dp2[n])
+END ALGORITHM

@@ -1,0 +1,19 @@
+Preparing OOP explanation
+
+Object Orientation
+
+Encapsulation – Each core concept lives in its own class with private state. Product hides name, price, quantity, exposing getters plus decrementQuantity()/increaseQuantity() so stock changes stay centralised. VendingMachine keeps insertedCoins and products private behind methods such as insertCoin, getTotalInsertedCoins, and purchase, so commands can’t tamper with internals directly.
+
+Abstraction – The Command interface defines a simple execute(VendingMachine,String[]) contract. CmdInsertCoin, CmdRejectCoins, CmdPurchase, CmdCheckProductInfo, and CmdAddProduct all implement it, each representing one user action. Main never needs command-specific knowledge; it just picks the right implementation and calls execute.
+
+Polymorphism – Because every command implements Command, Main stores them in a single variable (Command cmdObj). At runtime the JVM dispatches to the correct execute based on the actual class—classic subtype polymorphism.
+
+Inheritance / Interfaces – Java only uses interfaces here. Command acts like a base type; every concrete command class “inherits” its contract and must provide the execute implementation. This keeps behaviour consistent and swappable.
+
+Composition / Collaboration – VendingMachine composes Product instances, while commands collaborate with the machine to perform actions (insert coins, reject coins, check products, purchase). There’s no inheritance between them; relationships are “has-a” and “uses” rather than “is-a”.
+
+Single Responsibility – Each class focuses on one job: Product models stock, VendingMachine manages inventory/credit, command classes translate console commands into operations, Main handles I/O loop. This separation makes behaviour easier to reason about and change.
+
+Data Abstraction & Information Hiding – Callers never manipulate raw collections; they work through well-defined methods (e.g., calculateChange, getInsertedCoins, getProductInfo). This lets internals evolve without ripple effects.
+
+Together these patterns show typical OOP design in Java: interface-driven commands, stateful domain objects, and strict encapsulation to keep responsibilities clear and interactions safe.

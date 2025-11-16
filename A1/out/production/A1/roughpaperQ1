@@ -1,0 +1,42 @@
+case1:
+    if comCode1 == comCode2 && comCode1 == BNB
+        if fall2 > fall1
+            needpay = fall2 - fall1
+        else
+            needpay = 0
+case2:
+    if route1[0] == 'P'
+        needpay = 0
+    
+else case:
+    if comCode1 != BNB
+        needpay = fall2
+    if route2[0] == A
+        needpay = fall2
+    if balance - fall1 < 1
+        return 0
+
+-------------------- breakline --------------------
+// Exclusions (checked first)
+if comCode1 != BNB:
+    needpay = fall2
+    return needpay
+if route2[0] == 'A':
+    needpay = fall2
+    return needpay
+if balance - fall1 < 1:
+    return 0
+// Discounts (only if none of the exclusions applied)
+if route1[0] == 'P':
+    needpay = 0
+    return needpay
+if comCode1 == 'BNB' and comCode2 == 'BNB':
+    if fall2 > fall1:
+        needpay = fall2 - fall1
+    else:
+        needpay = 0
+    return needpay
+// Default (no discount applies)
+
+needpay = 0
+return needpay
