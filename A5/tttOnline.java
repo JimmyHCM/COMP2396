@@ -1,424 +1,573 @@
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import javax.swing.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 
 /**
- * Swing UI for a tic-tac-toe game played by a human against a computer.
+ * Swing client for the online Tic-Tac-Toe game.
  */
 public class tttOnline extends JFrame implements ActionListener {
 
-    private static final String WELCOME_MESSAGE = "WELCOME";
-    private static final String WAITING_MESSAGE = "Valid move, waiting for your opponent.";
-    private static final String PLAYER_TURN_MESSAGE = "Your opponent has moved, now is your turn.";
+    private static final long serialVersionUID = 1L;
+
+    private static final String TITLE_PREFIX = "Tic Tac Toe";
+    private static final String DEFAULT_HOST = "localhost";
+    private static final int DEFAULT_PORT = 5000;
 
     private final JButton[][] boardButtons = new JButton[3][3];
-    private final char[][] boardState = new char[3][3];
-    private final Random random = new Random();
     private JTextField nameField;
+    private JButton submitNameButton;
     private JLabel messageLabel;
-    private JLabel playerScoreLabel;
-    private JLabel computerScoreLabel;
+    private JLabel playerXScoreLabel;
+    private JLabel playerOScoreLabel;
     private JLabel drawScoreLabel;
-    private JLabel timeLabel;
-    private boolean playerTurn = true;
-    private boolean gameActive = false;
-    private boolean awaitingRestart = false;
-    private Timer computerMoveTimer;
-    private Timer roundTimer;
-    private long roundStartMillis;
-    private int playerWins;
-    private int computerWins;
-    private int draws;
 
-    JMenuBar menuBar;
-    JMenu controlMenu, helpMenu;
-    JMenuItem exitItem, helpItem;
+    private Socket socket;
+    private BufferedReader reader;
+    private PrintWriter writer;
+    private Thread listenerThread;
+
+    private volatile int playerIndex = -1;
+    private volatile boolean myTurn;
+    private volatile boolean awaitingRestart;
+    private volatile boolean waitingForServerAck;
+    private volatile boolean connected;
+    private volatile boolean nameSubmitted;
+    private volatile boolean exitSent;
+
+    private String playerXName = "";
+    private String playerOName = "";
+    private int xWins;
+    private int oWins;
+    private int drawCount;
+
+    private JMenuItem exitItem;
+    private JMenuItem helpItem;
 
     private void initPanel() {
         getContentPane().setLayout(new BorderLayout());
 
         JPanel messagePanel = new JPanel();
-        messageLabel = new JLabel("Enter your player name...");
+        messageLabel = new JLabel("Connecting to server...");
         messagePanel.add(messageLabel);
         add(messagePanel, BorderLayout.NORTH);
 
-        JPanel gamePanel = new JPanel(new BorderLayout());
-        JPanel boardPanel = new JPanel(new GridLayout(3, 3));
-        JPanel scorePanel = new JPanel();
-        scorePanel.setLayout(new BoxLayout(scorePanel, BoxLayout.Y_AXIS));
-
+        JPanel boardPanel = new JPanel(new GridLayout(3, 3, 2, 2));
         Font cellFont = new Font(Font.SANS_SERIF, Font.BOLD, 36);
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 3; col++) {
-                JButton cellButton = new JButton();
-                cellButton.setFont(cellFont);
-                cellButton.addActionListener(this);
-                boardButtons[row][col] = cellButton;
-                boardPanel.add(cellButton);
+                JButton button = new JButton();
+                button.setFont(cellFont);
+                button.setActionCommand("CELL_" + row + "_" + col);
+                button.addActionListener(this);
+                button.setEnabled(false);
+                boardButtons[row][col] = button;
+                boardPanel.add(button);
             }
         }
 
+        JPanel scorePanel = new JPanel();
+        scorePanel.setLayout(new BoxLayout(scorePanel, BoxLayout.Y_AXIS));
         scorePanel.add(new JLabel("Scoreboard"));
         scorePanel.add(Box.createVerticalStrut(8));
-        playerScoreLabel = new JLabel("Player X: 0");
-        computerScoreLabel = new JLabel("Player O: 0");
+        playerXScoreLabel = new JLabel("Player X: 0");
+        playerOScoreLabel = new JLabel("Player O: 0");
         drawScoreLabel = new JLabel("Draws: 0");
-        scorePanel.add(playerScoreLabel);
-        scorePanel.add(computerScoreLabel);
+        scorePanel.add(playerXScoreLabel);
+        scorePanel.add(Box.createVerticalStrut(4));
+        scorePanel.add(playerOScoreLabel);
+        scorePanel.add(Box.createVerticalStrut(4));
         scorePanel.add(drawScoreLabel);
 
+        JPanel gamePanel = new JPanel(new BorderLayout());
         gamePanel.add(boardPanel, BorderLayout.CENTER);
         gamePanel.add(scorePanel, BorderLayout.EAST);
         add(gamePanel, BorderLayout.CENTER);
 
-        JPanel bottomPanel = new JPanel(new BorderLayout());
         JPanel inputPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        JPanel timePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-
         inputPanel.add(new JLabel("Player name:"));
         nameField = new JTextField(12);
+        nameField.setEnabled(false);
+        submitNameButton = new JButton("Submit");
+        submitNameButton.setEnabled(false);
+        submitNameButton.addActionListener(evt -> submitName());
+        nameField.addActionListener(evt -> submitName());
         inputPanel.add(nameField);
-        nameField.addActionListener(e -> startGameIfReady());
-
-        timeLabel = new JLabel("Time: --:--");
-        timePanel.add(timeLabel);
-
-        bottomPanel.add(inputPanel, BorderLayout.NORTH);
-        bottomPanel.add(timePanel, BorderLayout.SOUTH);
-        add(bottomPanel, BorderLayout.SOUTH);
+        inputPanel.add(submitNameButton);
+        add(inputPanel, BorderLayout.SOUTH);
     }
 
     private void initMenu() {
-        menuBar = new JMenuBar();
-        controlMenu = new JMenu("Control");
-        helpMenu = new JMenu("Help");
+        JMenuBar menuBar = new JMenuBar();
+        JMenu controlMenu = new JMenu("Control");
+        JMenu helpMenu = new JMenu("Help");
 
         exitItem = new JMenuItem("Exit");
-        helpItem = new JMenuItem("Instructions");
+        helpItem = new JMenuItem("Instruction");
+
+        exitItem.addActionListener(evt -> handleExit());
+        helpItem.addActionListener(evt -> showInstructions());
 
         controlMenu.add(exitItem);
         helpMenu.add(helpItem);
         menuBar.add(controlMenu);
         menuBar.add(helpMenu);
-
         setJMenuBar(menuBar);
-
-        exitItem.addActionListener(evt -> handleExit());
-        helpItem.addActionListener(evt -> showInstructions());
     }
 
     /**
-     * Constructs the main game window and initialises the UI components.
+     * Creates the client UI and connects to the Tic-Tac-Toe server.
+     *
+     * @param host server host name
+     * @param port server port
      */
-    public tttOnline() {
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+    public tttOnline(String host, int port) {
+        super(TITLE_PREFIX);
+        setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         initMenu();
         initPanel();
-        setSize(500, 500);
+        setSize(520, 480);
+        setLocationRelativeTo(null);
+        setResizable(false);
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                handleExit();
+            }
+        });
         setVisible(true);
+        connectToServer(host, port);
     }
 
     /**
-     * Handles menu selections and board clicks.
+     * Handles board button clicks.
      *
-     * @param e the event raised by the UI component
+     * @param event the action event raised by a button press
      */
     @Override
-    public void actionPerformed(ActionEvent e) {
-        Object source = e.getSource();
-
-        if (source == exitItem) {
-            handleExit();
+    public void actionPerformed(ActionEvent event) {
+        String command = event.getActionCommand();
+        if (command == null || !command.startsWith("CELL_")) {
             return;
         }
 
-        if (source == helpItem) {
-            showInstructions();
+        if (!connected || awaitingRestart || waitingForServerAck || !myTurn) {
             return;
         }
 
-        if (!(source instanceof JButton)) {
+        String[] parts = command.split("_");
+        if (parts.length != 3) {
             return;
         }
 
-        JButton cell = (JButton) source;
-        Point location = locateCell(cell);
-        if (location == null) {
-            return;
-        }
-
-        if (!gameActive) {
-            startGameIfReady();
-        }
-
-        if (!gameActive || awaitingRestart || !playerTurn) {
-            return;
-        }
-
-        if (!cell.getText().isEmpty()) {
-            return;
-        }
-
-        handlePlayerMove(cell, location);
+        int row = Integer.parseInt(parts[1]);
+        int col = Integer.parseInt(parts[2]);
+        waitingForServerAck = true;
+        sendMessage("MOVE|" + row + "|" + col);
     }
 
     /**
-     * Launches the application.
+     * Launches the Tic-Tac-Toe client.
      *
-     * @param args ignored command line arguments
+     * @param args optional command line arguments: host [port]
      */
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new tttOnline());
+        String host = DEFAULT_HOST;
+        int port = DEFAULT_PORT;
+        if (args.length >= 1) {
+            host = args[0];
+        }
+        if (args.length >= 2) {
+            try {
+                port = Integer.parseInt(args[1]);
+            } catch (NumberFormatException ex) {
+                System.err.println("Port must be an integer. Using default: " + DEFAULT_PORT);
+                port = DEFAULT_PORT;
+            }
+        }
+
+        String finalHost = host;
+        int finalPort = port;
+        SwingUtilities.invokeLater(() -> new tttOnline(finalHost, finalPort));
     }
 
-    private void startGameIfReady() {
-        if (gameActive) {
+    private void submitName() {
+        if (!connected || nameSubmitted) {
             return;
         }
-
-        if (nameField.getText().trim().isEmpty()) {
+        String name = nameField.getText().trim();
+        if (name.isEmpty()) {
+            messageLabel.setText("Name cannot be empty.");
             return;
         }
+        name = name.replace('|', ' ');
+        submitNameButton.setEnabled(false);
+        nameField.setEnabled(false);
+        sendMessage("NAME|" + name);
+    }
 
-        if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
-            computerMoveTimer.stop();
+    private void connectToServer(String host, int port) {
+        new Thread(() -> {
+            try {
+                socket = new Socket(host, port);
+                reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+                connected = true;
+                SwingUtilities.invokeLater(() -> {
+                    messageLabel.setText("Enter your player name...");
+                    nameField.setEnabled(true);
+                    submitNameButton.setEnabled(true);
+                });
+                listenerThread = new Thread(new ServerListener(), "ttt-listener");
+                listenerThread.setDaemon(true);
+                listenerThread.start();
+            } catch (IOException ex) {
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(tttOnline.this,
+                            "Unable to connect to server: " + ex.getMessage(),
+                            "Connection Error", JOptionPane.ERROR_MESSAGE);
+                    messageLabel.setText("Unable to connect. Please close the window.");
+                });
+            }
+        }, "ttt-connector").start();
+    }
+
+    private void onAssigned(int index) {
+        playerIndex = index;
+        updateScoreLabels();
+    }
+
+    private void onNameConfirmed(int index, String name) {
+        if (index == 0) {
+            playerXName = name;
+        } else {
+            playerOName = name;
         }
 
-        resetBoard();
-        gameActive = true;
-        playerTurn = true;
+        if (index == playerIndex) {
+            nameSubmitted = true;
+            nameField.setText(name);
+            nameField.setEnabled(false);
+            submitNameButton.setEnabled(false);
+            messageLabel.setText("WELCOME " + name);
+            setTitle(TITLE_PREFIX + "-Player: " + name);
+        }
+        updateScoreLabels();
+    }
+
+    private void onRoundStart(int currentPlayer) {
         awaitingRestart = false;
-        String playerName = nameField.getText().trim();
-        messageLabel.setText(WELCOME_MESSAGE + " " + playerName);
-        setBoardEnabled(true);
-        startRoundTimer();
+        waitingForServerAck = false;
+        resetBoard();
+        myTurn = playerIndex == currentPlayer;
+        if (myTurn) {
+            messageLabel.setText("Your turn. Make your move.");
+            setBoardEnabled(true);
+        } else {
+            messageLabel.setText("Waiting for your opponent to make the first move.");
+            setBoardEnabled(false);
+        }
     }
 
-    private void handlePlayerMove(JButton cell, Point location) {
-        boardState[location.x][location.y] = 'X';
-        cell.setText("X");
-        cell.setEnabled(false);
-
-        if (checkWinner('X')) {
-            finishRound("Congratulations, you win!", RoundOutcome.PLAYER);
+    private void onMarkPlaced(int row, int col, char mark) {
+        if (row < 0 || row >= 3 || col < 0 || col >= 3) {
             return;
         }
-
-        if (isBoardFull()) {
-            finishRound("Round ends in a draw.", RoundOutcome.DRAW);
-            return;
-        }
-
-        playerTurn = false;
-        messageLabel.setText(WAITING_MESSAGE);
-        scheduleComputerMove();
+        JButton button = boardButtons[row][col];
+        button.setText(String.valueOf(mark));
+        button.setEnabled(false);
     }
 
-    private void scheduleComputerMove() {
-        if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
-            computerMoveTimer.stop();
+    private void onTurnChanged(int currentPlayer) {
+        myTurn = playerIndex == currentPlayer;
+        waitingForServerAck = false;
+        if (myTurn) {
+            messageLabel.setText("Your opponent has moved, now is your turn.");
+            setBoardEnabled(true);
+        } else {
+            messageLabel.setText("Valid move, wait for your opponent.");
+            setBoardEnabled(false);
         }
-
-        computerMoveTimer = new Timer(2000, evt -> {
-            computerMoveTimer.stop();
-            executeComputerMove();
-        });
-        computerMoveTimer.setRepeats(false);
-        computerMoveTimer.start();
     }
 
-    private void executeComputerMove() {
-        List<Point> emptyCells = collectEmptyCells();
-        if (emptyCells.isEmpty()) {
-            finishRound("Round ends in a draw.", RoundOutcome.DRAW);
-            return;
+    private void onInvalidAction(String reason) {
+        waitingForServerAck = false;
+        messageLabel.setText(reason);
+        if (!nameSubmitted) {
+            nameField.setEnabled(true);
+            submitNameButton.setEnabled(true);
+        } else if (myTurn && !awaitingRestart) {
+            setBoardEnabled(true);
         }
-
-        Point choice = emptyCells.get(random.nextInt(emptyCells.size()));
-        JButton cell = boardButtons[choice.x][choice.y];
-        boardState[choice.x][choice.y] = 'O';
-        cell.setText("O");
-        cell.setEnabled(false);
-
-        if (checkWinner('O')) {
-            finishRound("Your opponent wins this round.", RoundOutcome.COMPUTER);
-            return;
-        }
-
-        if (isBoardFull()) {
-            finishRound("Round ends in a draw.", RoundOutcome.DRAW);
-            return;
-        }
-
-        playerTurn = true;
-        messageLabel.setText(PLAYER_TURN_MESSAGE);
     }
 
-    private void finishRound(String message, RoundOutcome outcome) {
-        gameActive = false;
-        playerTurn = false;
+    private void onRoundEndWin(int winnerIndex, int newXWins, int newOWins, int newDraws) {
         awaitingRestart = true;
-        messageLabel.setText(message);
-        if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
-            computerMoveTimer.stop();
-        }
-        stopRoundTimer();
+        myTurn = false;
+        waitingForServerAck = false;
         setBoardEnabled(false);
-        applyOutcome(outcome);
-
-        Object[] options = {"Yes"};
-        int choice = JOptionPane.showOptionDialog(this, message + "\nPlay another round?", "Round Complete",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
-        if (choice == 0) {
-            awaitingRestart = false;
-            startGameIfReady();
+        xWins = newXWins;
+        oWins = newOWins;
+        drawCount = newDraws;
+        boolean winner = winnerIndex == playerIndex;
+        messageLabel.setText(winner ? "You win!" : "You lose.");
+        String dialogText = winner ? "You win! Start a new round?" : "You lose. Start a new round?";
+        int option = JOptionPane.showConfirmDialog(this, dialogText, "Round Complete",
+                JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+        if (option == JOptionPane.YES_OPTION) {
+            sendMessage("RESTART|YES");
+            updateScoreLabels();
+        } else {
+            sendMessage("RESTART|NO");
+            handleExit();
         }
     }
 
-    private boolean checkWinner(char mark) {
-        for (int row = 0; row < 3; row++) {
-            if (boardState[row][0] == mark && boardState[row][1] == mark && boardState[row][2] == mark) {
-                return true;
-            }
+    private void onRoundEndDraw(int newXWins, int newOWins, int newDraws) {
+        awaitingRestart = true;
+        myTurn = false;
+        waitingForServerAck = false;
+        setBoardEnabled(false);
+        xWins = newXWins;
+        oWins = newOWins;
+        drawCount = newDraws;
+        messageLabel.setText("Round ends in a draw.");
+        int option = JOptionPane.showConfirmDialog(this, "Round ends in a draw. Start a new round?",
+                "Round Complete", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+        if (option == JOptionPane.YES_OPTION) {
+            sendMessage("RESTART|YES");
+            updateScoreLabels();
+        } else {
+            sendMessage("RESTART|NO");
+            handleExit();
         }
-
-        for (int col = 0; col < 3; col++) {
-            if (boardState[0][col] == mark && boardState[1][col] == mark && boardState[2][col] == mark) {
-                return true;
-            }
-        }
-
-        return (boardState[0][0] == mark && boardState[1][1] == mark && boardState[2][2] == mark)
-            || (boardState[0][2] == mark && boardState[1][1] == mark && boardState[2][0] == mark);
     }
 
-    private boolean isBoardFull() {
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 3; col++) {
-                if (boardState[row][col] == '\0') {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    private List<Point> collectEmptyCells() {
-        List<Point> empty = new ArrayList<>();
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 3; col++) {
-                if (boardState[row][col] == '\0') {
-                    empty.add(new Point(row, col));
-                }
-            }
-        }
-        return empty;
-    }
-
-    private Point locateCell(JButton cell) {
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 3; col++) {
-                if (boardButtons[row][col] == cell) {
-                    return new Point(row, col);
-                }
-            }
-        }
-        return null;
+    private void onOpponentLeft() {
+        awaitingRestart = false;
+        myTurn = false;
+        waitingForServerAck = false;
+        setBoardEnabled(false);
+        JOptionPane.showMessageDialog(this, "Game Ends. One of the players left.", "Game Ends",
+                JOptionPane.INFORMATION_MESSAGE);
+        handleExit();
     }
 
     private void resetBoard() {
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 3; col++) {
-                boardState[row][col] = '\0';
-                boardButtons[row][col].setText("");
-                boardButtons[row][col].setEnabled(true);
+                JButton button = boardButtons[row][col];
+                button.setText("");
+                button.setEnabled(false);
             }
         }
     }
 
     private void setBoardEnabled(boolean enabled) {
         for (JButton[] row : boardButtons) {
-            for (JButton cell : row) {
+            for (JButton button : row) {
                 if (enabled) {
-                    cell.setEnabled(cell.getText().isEmpty());
+                    button.setEnabled(button.getText().isEmpty());
                 } else {
-                    cell.setEnabled(false);
+                    button.setEnabled(false);
                 }
             }
         }
     }
 
-    private void applyOutcome(RoundOutcome outcome) {
-        switch (outcome) {
-            case PLAYER -> playerWins++;
-            case COMPUTER -> computerWins++;
-            case DRAW -> draws++;
-        }
-        updateScoreLabels();
-    }
-
     private void updateScoreLabels() {
-        playerScoreLabel.setText("Player X: " + playerWins);
-        computerScoreLabel.setText("Player O: " + computerWins);
-        drawScoreLabel.setText("Draws: " + draws);
+        String xLabelName = playerXName == null || playerXName.isBlank()
+                ? "Player X"
+                : "Player X (" + playerXName + ")";
+        String oLabelName = playerOName == null || playerOName.isBlank()
+                ? "Player O"
+                : "Player O (" + playerOName + ")";
+        playerXScoreLabel.setText(xLabelName + ": " + xWins);
+        playerOScoreLabel.setText(oLabelName + ": " + oWins);
+        drawScoreLabel.setText("Draws: " + drawCount);
     }
 
     private void handleExit() {
-        stopRoundTimer();
-        if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
-            computerMoveTimer.stop();
+        if (connected) {
+            sendExitMessage();
         }
+        disconnect();
         dispose();
         System.exit(0);
     }
 
     private void showInstructions() {
         StringBuilder instructions = new StringBuilder();
-        instructions.append("Tic-Tac-Toe Rules:\n\n");
-        instructions.append("1. Enter your name to begin.\n");
-        instructions.append("2. You always play first as 'X'.\n");
-        instructions.append("3. Click any empty cell on your turn.\n");
-        instructions.append("4. The computer moves as 'O' after a 2-second delay.\n");
-        instructions.append("5. Complete a row, column, or diagonal to win.\n");
-        instructions.append("6. Filling the board without a winner results in a draw.\n");
-        instructions.append("7. Use Control > Exit to close the game.");
-
-        JOptionPane.showMessageDialog(this, instructions.toString(), "Instructions",
+        instructions.append("Tic-Tac-Toe Online Instructions:\n\n");
+        instructions.append("1. Enter your player name before making a move.\n");
+        instructions.append("2. Player X always starts first in each round.\n");
+        instructions.append("3. You may only play on your turn and on empty cells.\n");
+        instructions.append("4. A row, column, or diagonal of your mark wins the round.\n");
+        instructions.append("5. Select \"Yes\" after a round to start the next round, or \"No\" to exit.\n");
+        instructions.append("6. Use Control > Exit or close the window to leave the match.");
+        JOptionPane.showMessageDialog(this, instructions.toString(), "Instruction",
                 JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private void startRoundTimer() {
-        roundStartMillis = System.currentTimeMillis();
-        if (roundTimer == null) {
-            roundTimer = new Timer(1000, evt -> updateTimeLabel());
-            roundTimer.setInitialDelay(1000);
-        } else if (roundTimer.isRunning()) {
-            roundTimer.stop();
+    private void disconnect() {
+        connected = false;
+        if (listenerThread != null) {
+            listenerThread.interrupt();
         }
-        updateTimeLabel();
-        roundTimer.start();
-    }
-
-    private void stopRoundTimer() {
-        if (roundTimer != null && roundTimer.isRunning()) {
-            roundTimer.stop();
+        if (reader != null) {
+            try {
+                reader.close();
+            } catch (IOException ignored) {
+                // no-op
+            }
+        }
+        if (writer != null) {
+            writer.close();
+        }
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // no-op
+            }
         }
     }
 
-    private void updateTimeLabel() {
-        long elapsedSeconds = Math.max(0, (System.currentTimeMillis() - roundStartMillis) / 1000);
-        long minutes = elapsedSeconds / 60;
-        long seconds = elapsedSeconds % 60;
-        timeLabel.setText(String.format("Time: %02d:%02d", minutes, seconds));
+    private void sendExitMessage() {
+        if (!exitSent) {
+            sendMessage("EXIT");
+            exitSent = true;
+        }
     }
 
-    private enum RoundOutcome {
-        PLAYER,
-        COMPUTER,
-        DRAW
+    private void sendMessage(String message) {
+        if (writer == null) {
+            return;
+        }
+        writer.println(message);
+    }
+
+    private void handleServerMessage(String line) {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        String[] parts = line.split("\\|", -1);
+        String type = parts[0];
+        switch (type) {
+            case "ASSIGN" -> {
+                if (parts.length >= 2) {
+                    int index = Integer.parseInt(parts[1]);
+                    SwingUtilities.invokeLater(() -> onAssigned(index));
+                }
+            }
+            case "NAME_CONFIRMED" -> {
+                if (parts.length >= 3) {
+                    int index = Integer.parseInt(parts[1]);
+                    String name = parts[2];
+                    SwingUtilities.invokeLater(() -> onNameConfirmed(index, name));
+                }
+            }
+            case "ROUND_START" -> {
+                if (parts.length >= 2) {
+                    int current = Integer.parseInt(parts[1]);
+                    SwingUtilities.invokeLater(() -> onRoundStart(current));
+                }
+            }
+            case "MARK" -> {
+                if (parts.length >= 4) {
+                    int row = Integer.parseInt(parts[1]);
+                    int col = Integer.parseInt(parts[2]);
+                    char mark = parts[3].charAt(0);
+                    SwingUtilities.invokeLater(() -> onMarkPlaced(row, col, mark));
+                }
+            }
+            case "TURN" -> {
+                if (parts.length >= 2) {
+                    int current = Integer.parseInt(parts[1]);
+                    SwingUtilities.invokeLater(() -> onTurnChanged(current));
+                }
+            }
+            case "INVALID" -> {
+                String reason = parts.length >= 2 ? parts[1] : "Invalid action.";
+                SwingUtilities.invokeLater(() -> onInvalidAction(reason));
+            }
+            case "ROUND_END" -> handleRoundEnd(parts);
+            case "OPPONENT_LEFT" -> SwingUtilities.invokeLater(this::onOpponentLeft);
+            default -> {
+                // ignore unsupported messages
+            }
+        }
+    }
+
+    private void handleRoundEnd(String[] parts) {
+        if (parts.length < 2) {
+            return;
+        }
+        String outcome = parts[1];
+        if ("WIN".equals(outcome) && parts.length >= 6) {
+            int winner = Integer.parseInt(parts[2]);
+            int newXWins = Integer.parseInt(parts[3]);
+            int newOWins = Integer.parseInt(parts[4]);
+            int newDraws = Integer.parseInt(parts[5]);
+            SwingUtilities.invokeLater(() -> onRoundEndWin(winner, newXWins, newOWins, newDraws));
+        } else if ("DRAW".equals(outcome) && parts.length >= 5) {
+            int newXWins = Integer.parseInt(parts[2]);
+            int newOWins = Integer.parseInt(parts[3]);
+            int newDraws = Integer.parseInt(parts[4]);
+            SwingUtilities.invokeLater(() -> onRoundEndDraw(newXWins, newOWins, newDraws));
+        }
+    }
+
+    private void handleServerDisconnect() {
+        if (connected) {
+            connected = false;
+            SwingUtilities.invokeLater(() -> {
+                setBoardEnabled(false);
+                JOptionPane.showMessageDialog(this, "Disconnected from server.", "Connection Closed",
+                        JOptionPane.WARNING_MESSAGE);
+                dispose();
+                System.exit(0);
+            });
+        }
+    }
+
+    private class ServerListener implements Runnable {
+        @Override
+        public void run() {
+            try {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    handleServerMessage(line);
+                }
+            } catch (IOException ex) {
+                // connection lost
+            } finally {
+                handleServerDisconnect();
+            }
+        }
     }
 }
