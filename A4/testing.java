@@ -11,6 +11,7 @@ import javax.swing.*;
  */
 public class testing extends JFrame implements ActionListener {
 
+    private static final String WELCOME_MESSAGE = "WELCOME";
     private static final String WAITING_MESSAGE = "Valid move, waiting for your opponent.";
     private static final String PLAYER_TURN_MESSAGE = "Your opponent has moved, now is your turn.";
 
@@ -22,10 +23,13 @@ public class testing extends JFrame implements ActionListener {
     private JLabel playerScoreLabel;
     private JLabel computerScoreLabel;
     private JLabel drawScoreLabel;
+    private JLabel timeLabel;
     private boolean playerTurn = true;
     private boolean gameActive = false;
     private boolean awaitingRestart = false;
     private Timer computerMoveTimer;
+    private Timer roundTimer;
+    private long roundStartMillis;
     private int playerWins;
     private int computerWins;
     private int draws;
@@ -80,7 +84,7 @@ public class testing extends JFrame implements ActionListener {
         inputPanel.add(nameField);
         nameField.addActionListener(e -> startGameIfReady());
 
-        JLabel timeLabel = new JLabel("Time: --:--");
+        timeLabel = new JLabel("Time: --:--");
         timePanel.add(timeLabel);
 
         bottomPanel.add(inputPanel, BorderLayout.NORTH);
@@ -188,8 +192,10 @@ public class testing extends JFrame implements ActionListener {
         gameActive = true;
         playerTurn = true;
         awaitingRestart = false;
-        messageLabel.setText(PLAYER_TURN_MESSAGE);
+        String playerName = nameField.getText().trim();
+        messageLabel.setText(WELCOME_MESSAGE + " " + playerName);
         setBoardEnabled(true);
+        startRoundTimer();
     }
 
     private void handlePlayerMove(JButton cell, Point location) {
@@ -260,6 +266,7 @@ public class testing extends JFrame implements ActionListener {
         if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
             computerMoveTimer.stop();
         }
+        stopRoundTimer();
         setBoardEnabled(false);
         applyOutcome(outcome);
 
@@ -361,6 +368,10 @@ public class testing extends JFrame implements ActionListener {
     }
 
     private void handleExit() {
+        stopRoundTimer();
+        if (computerMoveTimer != null && computerMoveTimer.isRunning()) {
+            computerMoveTimer.stop();
+        }
         dispose();
         System.exit(0);
     }
@@ -378,6 +389,31 @@ public class testing extends JFrame implements ActionListener {
 
         JOptionPane.showMessageDialog(this, instructions.toString(), "Instructions",
                 JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void startRoundTimer() {
+        roundStartMillis = System.currentTimeMillis();
+        if (roundTimer == null) {
+            roundTimer = new Timer(1000, evt -> updateTimeLabel());
+            roundTimer.setInitialDelay(1000);
+        } else if (roundTimer.isRunning()) {
+            roundTimer.stop();
+        }
+        updateTimeLabel();
+        roundTimer.start();
+    }
+
+    private void stopRoundTimer() {
+        if (roundTimer != null && roundTimer.isRunning()) {
+            roundTimer.stop();
+        }
+    }
+
+    private void updateTimeLabel() {
+        long elapsedSeconds = Math.max(0, (System.currentTimeMillis() - roundStartMillis) / 1000);
+        long minutes = elapsedSeconds / 60;
+        long seconds = elapsedSeconds % 60;
+        timeLabel.setText(String.format("Time: %02d:%02d", minutes, seconds));
     }
 
     private enum RoundOutcome {
