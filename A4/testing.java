@@ -19,11 +19,14 @@ public class testing extends JFrame implements ActionListener {
     private final char[][] boardState = new char[3][3];
     private final Random random = new Random();
     private JTextField nameField;
+    private JButton submitNameButton;
     private JLabel messageLabel;
     private JLabel playerScoreLabel;
     private JLabel computerScoreLabel;
     private JLabel drawScoreLabel;
     private JLabel timeLabel;
+    private boolean nameSubmitted = false;
+    private String playerName = "";
     private boolean playerTurn = true;
     private boolean gameActive = false;
     private boolean awaitingRestart = false;
@@ -57,6 +60,7 @@ public class testing extends JFrame implements ActionListener {
                 JButton cellButton = new JButton();
                 cellButton.setFont(cellFont);
                 cellButton.addActionListener(this);
+                cellButton.setEnabled(false);
                 boardButtons[row][col] = cellButton;
                 boardPanel.add(cellButton);
             }
@@ -82,7 +86,10 @@ public class testing extends JFrame implements ActionListener {
         inputPanel.add(new JLabel("Player name:"));
         nameField = new JTextField(12);
         inputPanel.add(nameField);
-        nameField.addActionListener(e -> startGameIfReady());
+        nameField.addActionListener(e -> submitPlayerName());
+        submitNameButton = new JButton("Submit");
+        submitNameButton.addActionListener(e -> submitPlayerName());
+        inputPanel.add(submitNameButton);
 
         timeLabel = new JLabel("Time: --:--");
         timePanel.add(timeLabel);
@@ -98,7 +105,7 @@ public class testing extends JFrame implements ActionListener {
         helpMenu = new JMenu("Help");
 
         exitItem = new JMenuItem("Exit");
-        helpItem = new JMenuItem("Instructions");
+        helpItem = new JMenuItem("Instruction");
 
         controlMenu.add(exitItem);
         helpMenu.add(helpItem);
@@ -116,6 +123,7 @@ public class testing extends JFrame implements ActionListener {
      */
     public testing() {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setTitle("Tic Tac Toe");
         initMenu();
         initPanel();
         setSize(500, 500);
@@ -176,11 +184,7 @@ public class testing extends JFrame implements ActionListener {
     }
 
     private void startGameIfReady() {
-        if (gameActive) {
-            return;
-        }
-
-        if (nameField.getText().trim().isEmpty()) {
+        if (gameActive || !nameSubmitted) {
             return;
         }
 
@@ -192,10 +196,30 @@ public class testing extends JFrame implements ActionListener {
         gameActive = true;
         playerTurn = true;
         awaitingRestart = false;
-        String playerName = nameField.getText().trim();
-        messageLabel.setText(WELCOME_MESSAGE + " " + playerName);
+        messageLabel.setText(WELCOME_MESSAGE + " (" + playerName + ")");
         setBoardEnabled(true);
         startRoundTimer();
+    }
+
+    private void submitPlayerName() {
+        if (nameSubmitted) {
+            return;
+        }
+
+        String enteredName = nameField.getText().trim();
+        if (enteredName.isEmpty()) {
+            messageLabel.setText("Enter your player name...");
+            return;
+        }
+
+        playerName = enteredName;
+        nameSubmitted = true;
+        nameField.setText(playerName);
+        nameField.setEnabled(false);
+        submitNameButton.setEnabled(false);
+        messageLabel.setText(WELCOME_MESSAGE + " (" + playerName + ")");
+        setTitle("Tic Tac Toe-Player: " + playerName);
+        startGameIfReady();
     }
 
     private void handlePlayerMove(JButton cell, Point location) {
@@ -270,12 +294,14 @@ public class testing extends JFrame implements ActionListener {
         setBoardEnabled(false);
         applyOutcome(outcome);
 
-        Object[] options = {"Yes"};
+        Object[] options = {"Yes", "No"};
         int choice = JOptionPane.showOptionDialog(this, message + "\nPlay another round?", "Round Complete",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
-        if (choice == 0) {
+                JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
+        if (choice == JOptionPane.YES_OPTION) {
             awaitingRestart = false;
             startGameIfReady();
+        } else {
+            handleExit();
         }
     }
 
@@ -335,7 +361,7 @@ public class testing extends JFrame implements ActionListener {
             for (int col = 0; col < 3; col++) {
                 boardState[row][col] = '\0';
                 boardButtons[row][col].setText("");
-                boardButtons[row][col].setEnabled(true);
+                boardButtons[row][col].setEnabled(false);
             }
         }
     }
